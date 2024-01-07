@@ -1,0 +1,36 @@
+[package]
+name = "yaddak-encounter-server"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+axum = "0.7.3"
+chrono = "0.4.31"
+dotenv = "0.15.0"
+dotenv_codegen = "0.15.0"
+hyper = { version = "1.0", features = [] }
+hyper-util = { version = "0.1", features = ["tokio", "server-auto", "http1"] }
+rust-argon2 = "2.0"
+sea-query = {version = "0.30.6", features = ["uuid"]}
+sea-query-binder = { version = "0", features = [
+    "with-uuid",
+    "with-chrono",
+    "sqlx-postgres",
+    "runtime-async-std-native-tls"
+] }
+serde = { version = "1.0.194", features = ["serde_derive"] }
+serde_json = "1.0.110"
+sqlx = { version = "0.7", features = [
+    "runtime-tokio",
+    "tls-native-tls",
+    "postgres",
+    "uuid"
+] }
+tokio = { version = "1.0", features = ["full"] }
+tower = { version = "0.4", features = ["util"] }
+tower-http = { version = "0.5", features = ["timeout", "trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1.6.1", features = ["serde", "fast-rng", "v4"] }
