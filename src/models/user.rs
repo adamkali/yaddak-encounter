@@ -1,11 +1,10 @@
 use std::env;
 
-use sea_query_binder::SqlxBinder;
 use sqlx::{
     PgPool,
     query,
     query_as_with,
-    prelude::FromRow, Postgres, query_as, Statement
+    prelude::FromRow, Postgres, query_as, Statement, PgConnection
 };
 use sea_query::{
     Iden,
@@ -124,6 +123,7 @@ impl User {
 
     pub async fn user_email_not_used(client: PgPool, user_email: String) -> SResult<()> {
 
+        let mut client = client.try_acquire().unwrap();
         let (sql, _) = Query::select()
             .from(UserModel::Table)
             .limit(1)
@@ -132,7 +132,7 @@ impl User {
 
 
         let rows = query(&sql)
-            .fetch_all(&client)
+            .fetch_all(&mut *client)
             .await?;
 
         if !rows.is_empty() {
@@ -174,13 +174,14 @@ async fn get_users_by_username(
     client: PgPool,
     user_name: String
 ) -> SResult<Vec<User>> {
+        let mut client = client.try_acquire().unwrap();
     let (sql, _values) = Query::select()
         .from(UserModel::Table)
         .and_where(Expr::col(UserModel::UserEmail).like(user_name))
         .build(PostgresQueryBuilder);
 
     let rows: Vec<User> = query_as(&sql)
-        .fetch_all(&client)
+        .fetch_all(&mut *client)
         .await?;
 
     Ok(rows)
@@ -212,6 +213,7 @@ enum UserModel {
 
 impl Repo<'_, User> for User {
     async fn get(client: PgPool, id: Uuid) -> SResult<User> {
+        let mut client = client.try_acquire().unwrap();
         let (sql, _values) = Query::select()
             .columns([
                 UserModel::Id,
@@ -225,7 +227,7 @@ impl Repo<'_, User> for User {
             .build(PostgresQueryBuilder);
 
         let rows: User = query_as(&sql)
-            .fetch_one(&client)
+            .fetch_one(&mut *client)
             .await?;
 
         Ok(rows.into())
@@ -233,6 +235,7 @@ impl Repo<'_, User> for User {
     }
 
     async fn get_all(client: PgPool ) -> SResult<Vec<User>> {
+        let mut client = client.try_acquire().unwrap();
         let (sql, _values) = Query::select()
             .columns([
                 UserModel::Id,
@@ -244,13 +247,14 @@ impl Repo<'_, User> for User {
             .build(PostgresQueryBuilder);
 
         let users: Vec<User> = query_as(&sql)
-            .fetch_all(&client)
+            .fetch_all(&mut *client)
             .await?;
 
         Ok(users)
     }
 
     async fn post(client: PgPool, model: &User) ->  SResult<()> {
+        let mut client = client.try_acquire().unwrap();
         let (sql, _values) = Query::insert()
             .into_table(UserModel::Table)
             .columns([
@@ -267,13 +271,14 @@ impl Repo<'_, User> for User {
             ])
             .build(PostgresQueryBuilder);
         let _ = query(&sql)
-            .execute(&client)
+            .execute(&mut *client)
             .await?;
 
         Ok(())
     }
 
     async fn put(client: PgPool, id: Uuid, model: &User) -> SResult<()> {
+        let mut client = client.try_acquire().unwrap();
         let (sql, _values) = Query::update()
             .table(UserModel::Table)
             .values([
@@ -286,7 +291,7 @@ impl Repo<'_, User> for User {
             .build(PostgresQueryBuilder);
         
         let _ = query(sql.as_str())
-            .execute(&client)
+            .execute(&mut *client)
             .await?;
         
         Ok(())
@@ -294,18 +299,20 @@ impl Repo<'_, User> for User {
     }
 
     async fn delete(client: PgPool, id: Uuid) -> SResult<()> {
+        let mut client = client.try_acquire().unwrap();
         let (sql, _values) = Query::update()
             .table(UserModel::Table)
             .and_where(Expr::col(UserModel::Id).like(id))
             .build(PostgresQueryBuilder);
         
         let _ = query(sql.as_str())
-            .execute(&client)
+            .execute(&mut *client)
             .await?;
         Ok(())
     }
 
     async fn migrate(client: PgPool ) -> SResult<()> {
+        let mut client = client.try_acquire().unwrap();
         let sql = Table::create()
             .table(UserModel::Table)
             .if_not_exists()
@@ -321,7 +328,7 @@ impl Repo<'_, User> for User {
             .build(PostgresQueryBuilder);
 
         let _ = query(sql.as_str())
-            .execute(&client)
+            .execute(&mut *client)
             .await?;
         Ok(())
     }

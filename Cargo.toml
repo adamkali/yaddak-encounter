@@ -13,12 +13,12 @@ dotenv_codegen = "0.15.0"
 hyper = { version = "1.0", features = [] }
 hyper-util = { version = "0.1", features = ["tokio", "server-auto", "http1"] }
 rust-argon2 = "2.0"
-sea-query = {version = "0.30.6", features = ["uuid"]}
-sea-query-binder = { version = "0", features = [
+sea-query = {version = "0.30", features = ["uuid"]}
+sea-query-binder = { version = "0.5", features = [
     "with-uuid",
     "with-chrono",
     "sqlx-postgres",
-    "runtime-async-std-native-tls"
+    "runtime-tokio-native-tls"
 ] }
 serde = { version = "1.0.194", features = ["serde_derive"] }
 serde_json = "1.0.110"

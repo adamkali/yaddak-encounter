@@ -10,6 +10,7 @@ use tokio::{net::TcpListener, signal, sync::Mutex};
 use dotenv::dotenv;
 use axum::Router;
 use tower_http::{trace::TraceLayer, timeout::TimeoutLayer};
+use tracing::{field::debug, debug};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 // yaddak
@@ -30,18 +31,22 @@ async fn main() {
         .init();
 
     let con_str = format!(
-        "postgresql://{}:{}@localhost:8050/query",
+        "postgres://{}:{}@localhost:8050/{}",
         std::env::var("DB_USER").unwrap(),
-        std::env::var("DB_PASSWORD").unwrap()
+        std::env::var("DB_PASSWORD").unwrap(),
+        std::env::var("DB_NAME").unwrap()
     );
+    debug!("opening connection to db");
     let pool = PgPool::connect(&con_str)
         .await
         .unwrap();
 
+    debug!("migrating");
     let _ = migrate(pool.clone()).await;
     let state = Arc::new(Mutex::new(YaddakState { db: pool }));
     let user_router = user_controller(state.clone());
 
+    debug!("creating routes");
     let app = Router::new()
         .nest("/user", user_router)
         .layer((
@@ -53,6 +58,7 @@ async fn main() {
     let listener = TcpListener::bind("0.0.0.0:8000").await.unwrap();
 
     // Run the server with graceful shutdown
+    debug!("running server");
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await
