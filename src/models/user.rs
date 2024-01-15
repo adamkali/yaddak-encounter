@@ -1,10 +1,8 @@
 use std::env;
 
 use sqlx::{
-    PgPool,
     query,
-    query_as_with,
-    prelude::FromRow, Postgres, query_as, Statement, PgConnection
+    query_as, FromRow, query_as_with, query_with
 };
 use sea_query::{
     Iden,
@@ -14,16 +12,20 @@ use sea_query::{
     Table,
     ColumnDef
 };
+use sea_query_binder::SqlxBinder;
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+use tracing::debug;
+use utoipa::ToSchema;
+use uuid::{Uuid, fmt::Hyphenated};
 use argon2::{self, Config, Variant, Version};
 
-use crate::traits::repo::Repo;
+use crate::traits::repo::{Repo, connect};
 
 use super::errors::{YaddakError, SResult};
 
 #[derive(Serialize, Deserialize, Debug,
-         Clone, Default, FromRow)]
+         Clone, Default, FromRow,
+         ToSchema)]
 pub struct User {
     pub id: Uuid,
     pub user_name: String,
@@ -31,14 +33,16 @@ pub struct User {
     pub user_auth: String,
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone,
+         ToSchema)]
 pub struct CreateUserRequest {
     pub user_name: String,
     pub user_email: String,
     pub user_pass: String,
 }
 
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Debug, Clone,
+         ToSchema)]
 pub struct LoginUserRequest {
     pub user_name: String,
     pub user_pass: String,
@@ -55,13 +59,15 @@ impl User {
     }
 
     pub async fn create(
-        client: PgPool,
+        con_str: String,
         user_name: String,
         user_email: String,
         user_pass: String
     ) -> SResult<Self> {
-        User::user_name_not_used(client.clone(), user_name.clone()).await?;
-        User::user_email_not_used(client.clone(), user_email.clone()).await?;
+        debug!("Checking username");
+        User::user_name_not_used(con_str.clone(), user_name.clone()).await?;
+        debug!("Checking email");
+        User::user_email_not_used(con_str.clone(), user_email.clone()).await?;
         let mut user: User = User {
             user_email,
             user_name,
@@ -70,14 +76,14 @@ impl User {
         };
         user.hash_password(user_pass)?;
         
-        User::post(client, &user.clone()).await?;
+        User::post(con_str, &user.clone()).await?;
         
         Ok(user)
     }
 
     fn hash_password(&mut self, user_pass: String) -> SResult<()> {
         // Retrieve salt from environment variabl
-        let salt: String = env::var("UB_CARD_SECRET")?; 
+        let salt: String = env::var("YADDAK_SECRET")?; 
 
         let config = new_config(&salt.as_bytes());
 
@@ -88,7 +94,12 @@ impl User {
         self.user_auth = argon2::hash_encoded(
             concat_data.as_bytes(),
             self.id.as_bytes(),
-            &config)?;
+            &config)?
+            .rsplit('$')
+            .next()
+            .unwrap()
+            .to_string();
+
         
         Ok(())
 
@@ -106,13 +117,17 @@ impl User {
             user_pass,
         );
 
-        let salt = env::var("UB_CARD_SECRET")?;
+        let salt: String = env::var("YADDAK_SECRET")?; 
         let config = new_config(salt.as_bytes());
        
         let generated_auth = argon2::hash_encoded(
             concat_data.as_bytes(),
             self.id.as_bytes(),
-            &config)?;
+            &config)?
+            .rsplit('$')
+            .next()
+            .unwrap()
+            .to_string();
 
         if generated_auth.ne(&self.user_auth) {
             return Err(YaddakError::authorize_error("Could not Sign In".to_owned()));
@@ -121,17 +136,17 @@ impl User {
         Ok(())
     }
 
-    pub async fn user_email_not_used(client: PgPool, user_email: String) -> SResult<()> {
+    pub async fn user_email_not_used(con_str: String, user_email: String) -> SResult<()> {
+        let mut client = connect(con_str).await?;
 
-        let mut client = client.try_acquire().unwrap();
-        let (sql, _) = Query::select()
+        let (sql, values) = Query::select()
             .from(UserModel::Table)
             .limit(1)
-            .and_where(Expr::col(UserModel::UserEmail).like(user_email))
-            .build(PostgresQueryBuilder);
+            .and_where(Expr::col(UserModel::UserEmail).eq(user_email))
+            .build_sqlx(PostgresQueryBuilder);
 
 
-        let rows = query(&sql)
+        let rows: Vec<User> = query_as_with(&sql, values)
             .fetch_all(&mut *client)
             .await?;
 
@@ -142,9 +157,9 @@ impl User {
         Ok(())
     }
 
-    pub async fn user_name_not_used(client: PgPool, user_name: String) -> SResult<()> {
+    pub async fn user_name_not_used(con_str: String, user_name: String) -> SResult<()> {
         let rows = get_users_by_username(
-            client,
+            con_str,
             user_name
         ).await?;
         if !rows.is_empty() {
@@ -155,32 +170,63 @@ impl User {
     }
 
     pub async fn get_user_by_name(
-        client: PgPool,
+        con_str: String,
         user_name: String
     ) -> SResult<User> {
         let rows = get_users_by_username(
-            client,
-            user_name
+            con_str,
+            user_name.clone()
         ).await?;
+        debug!("{:?}",rows);
+        debug!("{:?}",user_name);
         if rows.len() != 1 {
             return Err(YaddakError::authorize_error("Not Found".to_string()));
         } else {
             Ok(User::from(rows[0].clone()))
         }
     }
+
+    pub async fn check_auth(
+        con_str: String,
+        auth_header:String
+    ) -> SResult<()> {
+        let mut client = connect(con_str).await?;
+        let (sql, values) = Query::select()
+            .from(UserModel::Table)
+            .columns([
+                UserModel::UserAuth,
+            ]) 
+            .and_where(Expr::col(UserModel::UserAuth).eq(auth_header))
+            .build_sqlx(PostgresQueryBuilder);
+
+        let rows: Vec<_> = query_with(&sql, values.clone())
+            .fetch_all(&mut *client)
+            .await?;
+
+        if rows.is_empty() {
+            return Err(YaddakError::authorize_error("Could not authenticate".to_string()));
+        }
+        Ok(())
+    }
 }
 
 async fn get_users_by_username(
-    client: PgPool,
+    con_str: String,
     user_name: String
 ) -> SResult<Vec<User>> {
-        let mut client = client.try_acquire().unwrap();
-    let (sql, _values) = Query::select()
+    let mut client = connect(con_str).await?;
+    let (sql, values) = Query::select()
         .from(UserModel::Table)
-        .and_where(Expr::col(UserModel::UserEmail).like(user_name))
-        .build(PostgresQueryBuilder);
+        .columns([
+            UserModel::Id,
+            UserModel::UserEmail,
+            UserModel::UserName,
+            UserModel::UserAuth,
+        ]) 
+        .and_where(Expr::col(UserModel::UserName).eq(user_name))
+        .build_sqlx(PostgresQueryBuilder);
 
-    let rows: Vec<User> = query_as(&sql)
+    let rows: Vec<User> = query_as_with(&sql, values.clone())
         .fetch_all(&mut *client)
         .await?;
 
@@ -212,9 +258,10 @@ enum UserModel {
 }
 
 impl Repo<'_, User> for User {
-    async fn get(client: PgPool, id: Uuid) -> SResult<User> {
-        let mut client = client.try_acquire().unwrap();
-        let (sql, _values) = Query::select()
+    async fn get(con_str: String, id: Uuid) -> SResult<User> {
+        let mut client = connect(con_str).await?;
+
+        let (sql, values) = Query::select()
             .columns([
                 UserModel::Id,
                 UserModel::UserEmail,
@@ -223,10 +270,12 @@ impl Repo<'_, User> for User {
             ]) 
             .from(UserModel::Table)
             .limit(1)
-            .and_where(Expr::col(UserModel::Id).like(id))
-            .build(PostgresQueryBuilder);
+            .and_where(Expr::col(UserModel::Id).eq(id))
+            .build_sqlx(PostgresQueryBuilder);
 
-        let rows: User = query_as(&sql)
+        debug!("query:\t{}", sql.clone());
+        debug!("values:\t{:?}", values.clone());
+        let rows: User = query_as_with(&sql, values.clone())
             .fetch_one(&mut *client)
             .await?;
 
@@ -234,9 +283,9 @@ impl Repo<'_, User> for User {
             
     }
 
-    async fn get_all(client: PgPool ) -> SResult<Vec<User>> {
-        let mut client = client.try_acquire().unwrap();
-        let (sql, _values) = Query::select()
+    async fn get_all(con_str: String ) -> SResult<Vec<User>> {
+        let mut client = connect(con_str).await?;
+        let (sql, values) = Query::select()
             .columns([
                 UserModel::Id,
                 UserModel::UserEmail,
@@ -244,18 +293,18 @@ impl Repo<'_, User> for User {
                 UserModel::UserAuth,
             ]) 
             .from(UserModel::Table)
-            .build(PostgresQueryBuilder);
+            .build_sqlx(PostgresQueryBuilder);
 
-        let users: Vec<User> = query_as(&sql)
+        let users: Vec<User> = query_as_with(&sql, values)
             .fetch_all(&mut *client)
             .await?;
 
         Ok(users)
     }
 
-    async fn post(client: PgPool, model: &User) ->  SResult<()> {
-        let mut client = client.try_acquire().unwrap();
-        let (sql, _values) = Query::insert()
+    async fn post(con_str: String, model: &User) ->  SResult<()> {
+        let mut client = connect(con_str).await?;
+        let (sql, values) = Query::insert()
             .into_table(UserModel::Table)
             .columns([
                 UserModel::Id,
@@ -264,22 +313,22 @@ impl Repo<'_, User> for User {
                 UserModel::UserAuth,
             ])
             .values_panic([
-                model.id.to_string().into(),
+                model.id.into(),
                 model.user_email.clone().into(),
                 model.user_name.clone().into(),
                 model.user_auth.clone().into(),
             ])
-            .build(PostgresQueryBuilder);
-        let _ = query(&sql)
+            .build_sqlx(PostgresQueryBuilder);
+        let _ = query_with(&sql, values)
             .execute(&mut *client)
             .await?;
 
         Ok(())
     }
 
-    async fn put(client: PgPool, id: Uuid, model: &User) -> SResult<()> {
-        let mut client = client.try_acquire().unwrap();
-        let (sql, _values) = Query::update()
+    async fn put(con_str: String, id: Uuid, model: &User) -> SResult<()> {
+        let mut client = connect(con_str).await?;
+        let (sql, values) = Query::update()
             .table(UserModel::Table)
             .values([
                 (UserModel::UserName, model.user_name.clone().into()),
@@ -287,10 +336,10 @@ impl Repo<'_, User> for User {
                 (UserModel::UserAuth, model.user_auth.clone().into()),
 
             ])
-            .and_where(Expr::col(UserModel::Id).like(id))
-            .build(PostgresQueryBuilder);
+            .and_where(Expr::col(UserModel::Id).eq(id))
+            .build_sqlx(PostgresQueryBuilder);
         
-        let _ = query(sql.as_str())
+        let _ = query_with(sql.as_str(), values)
             .execute(&mut *client)
             .await?;
         
@@ -298,21 +347,21 @@ impl Repo<'_, User> for User {
         
     }
 
-    async fn delete(client: PgPool, id: Uuid) -> SResult<()> {
-        let mut client = client.try_acquire().unwrap();
-        let (sql, _values) = Query::update()
+    async fn delete(con_str: String, id: Uuid) -> SResult<()> {
+        let mut client = connect(con_str).await?;
+        let (sql, values) = Query::update()
             .table(UserModel::Table)
-            .and_where(Expr::col(UserModel::Id).like(id))
-            .build(PostgresQueryBuilder);
+            .and_where(Expr::col(UserModel::Id).eq(id))
+            .build_sqlx(PostgresQueryBuilder);
         
-        let _ = query(sql.as_str())
+        let _ = query_with(sql.as_str(), values)
             .execute(&mut *client)
             .await?;
         Ok(())
     }
 
-    async fn migrate(client: PgPool ) -> SResult<()> {
-        let mut client = client.try_acquire().unwrap();
+    async fn migrate(con_str: String ) -> SResult<()> {
+        let mut client = connect(con_str).await?;
         let sql = Table::create()
             .table(UserModel::Table)
             .if_not_exists()

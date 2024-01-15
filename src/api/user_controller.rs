@@ -1,5 +1,4 @@
-
-use std::{sync::Arc, borrow::BorrowMut};
+use std::sync::Arc;
 
 use axum::{
     Json,
@@ -9,8 +8,7 @@ use axum::{
         get, post
     }
 };
-use hyper::StatusCode;
-use tokio::sync::Mutex;
+use hyper::{StatusCode, HeaderMap};
 use uuid::Uuid;
 
 use crate::{models::{
@@ -18,13 +16,23 @@ use crate::{models::{
     detailed_response::DetailedResponse,
     state::YaddakState,
     errors::YaddakErrorKind
-}, traits::repo::Repo};
+}, traits::repo::Repo, utilities::headers::auth_handler};
 
-async fn register(
-    State(state): State<Arc<Mutex<YaddakState>>>,
+#[utoipa::path(
+    post,
+    path = "/user",
+    request_body=CreateUserRequest,
+    responses(
+        (status = 200, description = "Created", body = DetailedResponse<User>),
+        (status = StatusCode::BAD_REQUEST, body = DetailedResponse<User>),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, body = DetailedResponse<User>)
+    )
+)]
+pub async fn register(
+    State(state): State<Arc<YaddakState>>,
     Json(payload): Json<CreateUserRequest>,
 ) -> (StatusCode, Json<DetailedResponse<User>>) {
-    let client = &state.lock().await.db;
+    let client = &state.db;
     
     match User::create(
         client.clone(),
@@ -47,11 +55,20 @@ async fn register(
     }
 }
 
-async fn login(
-    State(state): State<Arc<Mutex<YaddakState>>>,
+#[utoipa::path(
+    post,
+    path = "/user/login",
+    responses(
+        (status = 200, description = "Created", body = DetailedResponse<User>),
+        (status = StatusCode::BAD_REQUEST, body = DetailedResponse<User>),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, body = DetailedResponse<User>)
+    )
+)]
+pub(super) async fn login(
+    State(state): State<Arc<YaddakState>>,
     Json(payload): Json<LoginUserRequest>
 ) -> (StatusCode, Json<DetailedResponse<User>>) {
-    let client = &state.lock().await.db;
+    let client = &state.db;
     match User::get_user_by_name(
         client.clone(),
         payload.user_name.clone()
@@ -75,54 +92,98 @@ async fn login(
     }
 }
 
-async fn get_user(
-    State(state): State<Arc<Mutex<YaddakState>>>,
+pub(super) async fn get_user(
+    State(state): State<Arc<YaddakState>>,
+    headers: HeaderMap,
     Path(id): Path<Uuid>
 ) -> (StatusCode, Json<DetailedResponse<User>>) {
-    let client = &state.lock().await.db;
+    let client = &state.db;
+    match auth_handler(headers) {
+        Ok(ah) => {
+           if let Err(e) = User::check_auth(client.clone(), ah).await {
+                return (StatusCode::UNAUTHORIZED, Json(DetailedResponse::absorb_error(e)));
+           }
+        },
+        Err(err) => return (StatusCode::FORBIDDEN, Json(DetailedResponse::absorb_error(err)))
+    }
     match User::get(client.clone(), id).await {
         Ok(user) => (StatusCode::OK, Json(DetailedResponse::absorb_data(user))),
-        Err(err) => (StatusCode::OK, Json(DetailedResponse::absorb_error(err)))
+        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, Json(DetailedResponse::absorb_error(err)))
     }    
 }
 
-async fn get_all(
-    State(state): State<Arc<Mutex<YaddakState>>>,
+pub(super) async fn get_all(
+    State(state): State<Arc<YaddakState>>,
+    headers: HeaderMap,
 ) -> (StatusCode, Json<DetailedResponse<Vec<User>>>) {
-    let client = &state.lock().await.db;
+    let client = &state.db;
+    match auth_handler(headers) {
+        Ok(ah) => {
+           if let Err(e) = User::check_auth(client.clone(), ah).await {
+                return (StatusCode::UNAUTHORIZED, Json(DetailedResponse::absorb_error(e)));
+           }
+        },
+        Err(err) => return (StatusCode::FORBIDDEN, Json(DetailedResponse::absorb_error(err)))
+    }
+
     match User::get_all(client.clone()).await {
         Ok(user) => (StatusCode::OK, Json(DetailedResponse::absorb_data(user))),
-        Err(err) => (StatusCode::OK, Json(DetailedResponse::absorb_error(err)))
+        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, Json(DetailedResponse::absorb_error(err)))
     }    
 }
 
-async fn update(
-    State(state): State<Arc<Mutex<YaddakState>>>,
+pub(super) async fn update(
+    State(state): State<Arc<YaddakState>>,
     Path(id): Path<Uuid>,
+    headers: HeaderMap,
     Json(payload): Json<User>
 ) -> (StatusCode, Json<DetailedResponse<User>>) {
-    let client = &state.lock().await.db;
+    let client = &state.db;
+    match auth_handler(headers) {
+        Ok(ah) => {
+           if let Err(e) = User::check_auth(client.clone(), ah).await {
+                return (StatusCode::UNAUTHORIZED, Json(DetailedResponse::absorb_error(e)));
+           }
+        },
+        Err(err) => return (StatusCode::FORBIDDEN, Json(DetailedResponse::absorb_error(err)))
+    }
     match User::put(client.clone(), id, &payload).await {
         Ok(()) => (StatusCode::OK, Json(DetailedResponse::absorb_data(payload))),
         Err(err) => (StatusCode::NOT_MODIFIED, Json(DetailedResponse::absorb_error(err)))
     }
 }
 
-async fn remove(
-    State(state): State<Arc<Mutex<YaddakState>>>,
+pub(super) async fn remove(
+    State(state): State<Arc<YaddakState>>,
+    headers: HeaderMap,
     Path(id): Path<Uuid>,
 ) -> (StatusCode, Json<DetailedResponse<Uuid>>) {
-    let client = &state.lock().await.db;
+    let client = &state.db;
+    match auth_handler(headers) {
+        Ok(ah) => {
+           if let Err(e) = User::check_auth(client.clone(), ah).await {
+                return (StatusCode::UNAUTHORIZED, Json(DetailedResponse::absorb_error(e)));
+           }
+        },
+        Err(err) => return (StatusCode::FORBIDDEN, Json(DetailedResponse::absorb_error(err)))
+    }
     match User::delete(client.clone(), id).await {
         Ok(()) => (StatusCode::OK, Json(DetailedResponse::absorb_data(id))),
         Err(err) => (StatusCode::NOT_MODIFIED, Json(DetailedResponse::absorb_error(err)))
     }
 }
 
-pub fn user_controller(state: Arc<Mutex<YaddakState>>) -> Router {
+pub fn user_controller(state: Arc<YaddakState>) -> Router {
     Router::new()
-        .route("/", get(get_all).post(register))
-        .route("/:id", get(get_user).put(update).delete(remove))
+        .route("/", post(register))
         .route("/login", post(login))
         .with_state(state)
 }
+
+pub fn user_auth_controller(state: Arc<YaddakState>) -> Router {
+    Router::new()
+        .route("/", get(get_all))
+        .route("/:id", get(get_user).put(update).delete(remove))
+        .with_state(state)
+}
+

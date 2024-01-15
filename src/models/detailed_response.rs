@@ -1,14 +1,13 @@
 use serde::Serialize;
+use utoipa::ToSchema;
 
 use super::errors::YaddakError;
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 #[serde(rename_all="camelCase")]
 pub struct DetailedResponse<T>
 where T: Serialize + Default {
-    #[serde(skip_serializing_if="Option::is_none")]
     pub data: Option<T>,
-    #[serde(skip_serializing_if="Option::is_none")]
     pub error: Option<YaddakError>
 }
 

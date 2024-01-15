@@ -1,14 +1,15 @@
 use std::env::VarError;
 
 use serde::Serialize;
+use utoipa::ToSchema;
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, ToSchema)]
 pub struct YaddakError {
     pub kind: YaddakErrorKind,
     message: String,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, ToSchema)]
 pub enum YaddakErrorKind {
     EnvError,
     InternalError,
