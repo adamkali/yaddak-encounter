@@ -24,14 +24,17 @@ use crate::models::errors;
             user::LoginUserRequest,
             errors::YaddakError,
             errors::YaddakErrorKind,
+            crate::api::detailed_response::UserDetailedResponse,
+            crate::api::detailed_response::UserListDetailedResponse,
+            crate::api::detailed_response::UuidDetailedResponse,
         )
     ),
     tags(
         (name = "Yaddak Encounter API", description="Yet Another Dungeons and Dragons All in one Kit")
     )
 )]
-struct ApiDocs;
+pub struct ApiDocs;
 
 pub fn api_docs() -> SwaggerUi {
-    SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDocs)
+    SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDocs::openapi())
 }

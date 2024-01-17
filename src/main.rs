@@ -80,9 +80,9 @@ async fn main() {
     debug!("Creating SSL");
     let config = RustlsConfig::from_pem_file(
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("yaddak_encounter_private_key.pem"),
+            .join("yaddak_encounter_certificate.pem"),
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("yaddak_encounter_certificate.pem")
+            .join("yaddak_encounter_private_key.pem")
     )
         .await
         .unwrap();

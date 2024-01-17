@@ -249,7 +249,7 @@ fn new_config<'a>(salt: &[u8])
 
 
 #[derive(Iden)]
-enum UserModel {
+pub(crate) enum UserModel {
     Table,
     Id,
     UserName,

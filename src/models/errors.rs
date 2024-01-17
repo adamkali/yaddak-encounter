@@ -1,6 +1,6 @@
 use std::env::VarError;
 
-use serde::Serialize;
+use serde::Serialize ;
 use utoipa::ToSchema;
 
 #[derive(Serialize, Clone, ToSchema)]
@@ -15,6 +15,7 @@ pub enum YaddakErrorKind {
     InternalError,
     AuthError,
     DBError,
+    IoError,
 }
 
 
@@ -33,6 +34,8 @@ impl std::fmt::Display for YaddakError {
             YaddakErrorKind::DBError => {
                 write!(f, "[E004] Database Error:  {}", self.message)
             }
+            YaddakErrorKind::IoError => 
+                write!(f, "[E005] Io Error {}", self.message),
         }
     }
 }
@@ -68,6 +71,24 @@ impl From<sea_query::error::Error> for YaddakError {
     fn from(value: sea_query::error::Error) -> Self {
         return YaddakError {
             kind: YaddakErrorKind::DBError,
+            message: value.to_string()
+        };
+    }
+}
+
+impl From<std::io::Error> for YaddakError {
+    fn from(value: std::io::Error) -> Self {
+        return YaddakError {
+            kind: YaddakErrorKind::IoError,
+            message: value.to_string()
+        };
+    }
+}
+
+impl From<serde_json::Error> for YaddakError {
+    fn from(value: serde_json::Error) -> Self {
+        return YaddakError {
+            kind: YaddakErrorKind::IoError,
             message: value.to_string()
         };
     }

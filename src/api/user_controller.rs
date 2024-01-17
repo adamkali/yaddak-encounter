@@ -13,25 +13,31 @@ use uuid::Uuid;
 
 use crate::{models::{
     user::{User, CreateUserRequest, LoginUserRequest},
-    detailed_response::DetailedResponse,
+    detailed_response::{
+        DetailedResponse,
+        UserDetailedResponse,
+        UserListDetailedResponse,
+        UuidDetailedResponse
+    },
     state::YaddakState,
     errors::YaddakErrorKind
 }, traits::repo::Repo, utilities::headers::auth_handler};
+
 
 #[utoipa::path(
     post,
     path = "/user",
     request_body=CreateUserRequest,
     responses(
-        (status = 200, description = "Created", body = DetailedResponse<User>),
-        (status = StatusCode::BAD_REQUEST, body = DetailedResponse<User>),
-        (status = StatusCode::INTERNAL_SERVER_ERROR, body = DetailedResponse<User>)
+        (status = 200, description = "Created", body = UserDetailedResponse),
+        (status = StatusCode::BAD_REQUEST, body = UserDetailedResponse),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, body = UserDetailedResponse)
     )
 )]
 pub async fn register(
     State(state): State<Arc<YaddakState>>,
     Json(payload): Json<CreateUserRequest>,
-) -> (StatusCode, Json<DetailedResponse<User>>) {
+) -> (StatusCode, Json<UserDetailedResponse>) {
     let client = &state.db;
     
     match User::create(
@@ -58,16 +64,17 @@ pub async fn register(
 #[utoipa::path(
     post,
     path = "/user/login",
+    request_body=LoginUserRequest,
     responses(
-        (status = 200, description = "Created", body = DetailedResponse<User>),
-        (status = StatusCode::BAD_REQUEST, body = DetailedResponse<User>),
-        (status = StatusCode::INTERNAL_SERVER_ERROR, body = DetailedResponse<User>)
+        (status = 200, description = "Created", body = UserDetailedResponse),
+        (status = StatusCode::NOT_FOUND, body = UserDetailedResponse),
+        (status = StatusCode::UNAUTHORIZED, body = UserDetailedResponse)
     )
 )]
 pub(super) async fn login(
     State(state): State<Arc<YaddakState>>,
     Json(payload): Json<LoginUserRequest>
-) -> (StatusCode, Json<DetailedResponse<User>>) {
+) -> (StatusCode, Json<UserDetailedResponse>) {
     let client = &state.db;
     match User::get_user_by_name(
         client.clone(),
@@ -92,11 +99,24 @@ pub(super) async fn login(
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/auth/user/{id}",
+    responses(
+        (status = 200, description = "Created", body = UserDetailedResponse),
+        (status = StatusCode::UNAUTHORIZED, body = UserDetailedResponse),
+        (status = StatusCode::FORBIDDEN, body = UserDetailedResponse),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, body = UserDetailedResponse)
+    ),
+    params(
+        ("id"=Uuid, Path, description = "ID of the user")
+    )
+)]
 pub(super) async fn get_user(
     State(state): State<Arc<YaddakState>>,
     headers: HeaderMap,
     Path(id): Path<Uuid>
-) -> (StatusCode, Json<DetailedResponse<User>>) {
+) -> (StatusCode, Json<UserDetailedResponse>) {
     let client = &state.db;
     match auth_handler(headers) {
         Ok(ah) => {
@@ -112,10 +132,19 @@ pub(super) async fn get_user(
     }    
 }
 
+#[utoipa::path(
+    get,
+    path = "/auth/user",
+    responses(
+        (status = 200, description = "Created", body = UserDetailedResponse),
+        (status = StatusCode::BAD_REQUEST, body = UserDetailedResponse),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, body = UserDetailedResponse)
+    ),
+)]
 pub(super) async fn get_all(
     State(state): State<Arc<YaddakState>>,
     headers: HeaderMap,
-) -> (StatusCode, Json<DetailedResponse<Vec<User>>>) {
+) -> (StatusCode, Json<UserListDetailedResponse>) {
     let client = &state.db;
     match auth_handler(headers) {
         Ok(ah) => {
@@ -132,12 +161,26 @@ pub(super) async fn get_all(
     }    
 }
 
+#[utoipa::path(
+    put,
+    path = "/auth/user/{id}",
+    request_body = User,
+    responses(
+        (status = 200, description = "Created", body = UserDetailedResponse),
+        (status = StatusCode::UNAUTHORIZED, body = UserDetailedResponse),
+        (status = StatusCode::FORBIDDEN, body = UserDetailedResponse),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, body = UserDetailedResponse)
+    ),
+    params(
+        ("id"=Uuid, Path, description = "ID of the user")
+    )
+)]
 pub(super) async fn update(
     State(state): State<Arc<YaddakState>>,
     Path(id): Path<Uuid>,
     headers: HeaderMap,
     Json(payload): Json<User>
-) -> (StatusCode, Json<DetailedResponse<User>>) {
+) -> (StatusCode, Json<UserDetailedResponse>) {
     let client = &state.db;
     match auth_handler(headers) {
         Ok(ah) => {
@@ -153,11 +196,25 @@ pub(super) async fn update(
     }
 }
 
+#[utoipa::path(
+    put,
+    path = "/auth/user/{id}",
+    request_body = User,
+    responses(
+        (status = 200, description = "Created", body = UserDetailedResponse),
+        (status = StatusCode::UNAUTHORIZED, body = UserDetailedResponse),
+        (status = StatusCode::FORBIDDEN, body = UserDetailedResponse),
+        (status = StatusCode::INTERNAL_SERVER_ERROR, body = UserDetailedResponse)
+    ),
+    params(
+        ("id"=Uuid, Path, description = "ID of the user")
+    )
+)]
 pub(super) async fn remove(
     State(state): State<Arc<YaddakState>>,
     headers: HeaderMap,
     Path(id): Path<Uuid>,
-) -> (StatusCode, Json<DetailedResponse<Uuid>>) {
+) -> (StatusCode, Json<UuidDetailedResponse>) {
     let client = &state.db;
     match auth_handler(headers) {
         Ok(ah) => {
